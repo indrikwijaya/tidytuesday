@@ -18,9 +18,10 @@ ui <- fluidPage(
     sidebarPanel(
       selectInput("major_category",
                   "Occupation category:",
-                  choices = unique(jobs_gender$major_category),
+                  choices = unique(jobs_gender$major_category)),
+      selectInput("year",
                   "Year:",
-                  choices = unique(jobs_gender$))
+                  choices = unique(jobs_gender$year))
     ),
     
     # Show a plot of the generated distribution
@@ -35,7 +36,7 @@ server <- function(input, output) {
   
   output$jobs_scatter <- renderPlotly({
     p <- jobs_gender %>%
-      filter(year == 2016,
+      filter(year == input$year,
              total_workers >= 20000) %>%
       filter(major_category == input$major_category) %>%
       arrange(desc(wage_percent_of_male)) %>%
