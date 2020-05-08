@@ -51,7 +51,7 @@ server <- function(input, output) {
       scale_size_continuous(range = c(1, 10), guide = FALSE) +
       labs(x = "% of workforce reported as female",
            y = "% of median female salary / median male",
-           title = "Gender disparity and pay gap in 2016",
+           title = paste("Gender disparity and pay gap in ", input$year, sep = ""),
            subtitle = "Only occupations with at least 20,000 workers total",
            color = "Minor category") +
       scale_x_continuous(labels = percent_format()) +
