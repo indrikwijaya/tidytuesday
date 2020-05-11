@@ -1,0 +1,217 @@
+---
+title: "sanfransisco-tree"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warnings = FALSE, message = FALSE)
+```
+
+# Predict which trees are maintained by the San Fransisco Department of Public Works. 
+Inspired by Julia Silge
+
+```{r}
+library(tidyverse)
+theme_set(theme_light())
+sf_trees <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-01-28/sf_trees.csv')
+
+```
+
+- use parse_number() to get a rough estimate of the size of the plot from the plot_size column.
+- keep only observations with no NA values.
+```{r}
+trees_df <- sf_trees %>% 
+  mutate(legal_status = case_when(
+    legal_status == "DPW Maintained" ~ legal_status,
+    TRUE ~ "Other"
+  ),
+  plot_size = parse_number(plot_size)) %>% 
+  select(-address) %>% 
+  na.omit() %>% 
+  mutate_if(is.character, factor)
+```
+
+# How are these trees distributed across SF?
+```{r}
+trees_df %>% 
+  ggplot(aes(longitude, latitude, color = legal_status)) + 
+  geom_point(size = 0.5, alpha = 0.4) + 
+  labs(color = NULL)
+```
+Prelim observation: Spatial differences by category, but not so obvious how these are categorised.
+
+# How about the relationships with the caretaker of each tree?
+```{r}
+trees_df %>% 
+  count(legal_status, caretaker) %>% 
+  add_count(caretaker, wt = n, name = "caretaker_count") %>% 
+  filter(caretaker_count > 50) %>% 
+  group_by(legal_status) %>% 
+  mutate(percent_legal = n / sum(n)) %>% 
+  ggplot(aes(percent_legal, caretaker, fill = legal_status)) + 
+  geom_col(position = "dodge") +
+  labs(fill = NULL,
+       x = "% of trees in each category")
+```
+
+# Build model
+```{r}
+library(tidymodels)
+set.seed(123)
+trees_split <- initial_split(trees_df, strata = legal_status)
+trees_train <- training(trees_split)
+trees_test <- testing(trees_split)
+```
+We'll now build a recipe for data preprocessing.
+- First, we must tell the recipe() what our model is going to be (using a formula here) and what our training data is.
+- Next, we update the role for tree_id, since this is a varibale we might like to keep around for convenience as an identifier for rows but is not a predictor or outcome.
+- Next, we use step_other() to collapse categorical levels for species, caretaker, and the site info. Before this step, there were 300+ species!
+- The date column with when each tree was planted may be useful for fitting this model, but probably not the date, and then remove the original date variable.
+- There are many more DPW maintained trees than not, so let's downsample the data for training.
+
+The object tree_rec is a recipe that has not been trained on data yet (for eg, which categorical levels should be collapsed has not been calculated) and tree_prep is an object that has been trained on data.
+
+```{r}
+tree_rec <- recipe(legal_status ~ ., data = trees_train) %>% 
+  update_role(tree_id, new_role = "ID") %>% # convert tree_id column into just ID and won't be included in the model
+  step_other(species, caretaker, threshold = 0.01) %>% # can consider tuning threshold for step_other
+  step_other(site_info, threshold = 0.005) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_date(date, features = c("year")) %>% 
+  step_rm(date) %>%
+  step_downsample(legal_status)
+
+tree_prep <- prep(tree_rec)
+juiced <- juice(tree_prep)
+```
+Now it's time to create a model specification for a random forest where we will tune mtry(the number of predictors to sample at each split) and min_n (the number of observations needed to keep splitting nodes). These are hyperparameters that can't be learned from data when training the model.
+
+```{r}
+tune_spec <- rand_forest(
+  mtry = tune(),
+  trees = 1000,
+  min_n = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger")
+```
+
+We use workflow(), which is a convenience contained object for carrying around bits of models.
+```{r}
+tune_wf <- workflow() %>% 
+  add_recipe(tree_rec) %>% 
+  add_model(tune_spec)
+```
+
+# Train hyperparameters
+- Create a set of cross-validation resamples to use for tuning
+
+```{r}
+set.seed(234)
+trees_folds <- vfold_cv(trees_train, v = 5)
+```
+
+- Use parallel processing to train a whole bunch of models
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(345)
+tune_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = 10
+)
+
+tune_res
+```
+- Visualize to get rough idea on the hyperparameter space
+```{r}
+tune_res %>% 
+  collect_metrics() %>%
+  filter(.metric == "roc_auc") %>% 
+  select(mean, min_n, mtry) %>%
+  pivot_longer(min_n:mtry,
+               values_to = "value",
+               names_to = "parameter") %>% 
+  ggplot(aes(value, mean, color = parameter)) +
+  geom_point(show.legend = FALSE)+
+  facet_wrap(~ parameter, scales = "free_x")
+```
+Higher values of mtry are good (> 10) and lower values of min_n are good (< 10). We can use regular_grid from a smaller space to improve our model.
+- Use a smaller hyperparameter space based on the previous results
+```{r}
+rf_grid <- grid_regular(
+  mtry(range = c(10, 30)),
+  min_n(range = c(2, 8)),
+  levels = 5
+)
+
+set.seed(456)
+regular_res <- tune_grid(
+  tune_wf,
+  resamples = trees_folds,
+  grid = rf_grid
+)
+
+regular_res
+```
+- Visualize to performance from regular grid
+```{r}
+regular_res %>% 
+  collect_metrics() %>% 
+  filter(.metric == "roc_auc") %>%
+  mutate(min_n = factor(min_n)) %>% 
+  ggplot(aes(mtry, mean, color = min_n)) +
+  geom_line(alpha = 0.5, size = 1.5) + 
+  geom_point()
+```
+
+- Get the best hyperparameters based on ROC-AUC for our best model
+```{r}
+best_auc <- select_best(regular_res, "roc_auc")
+
+final_rf <- finalize_model(
+  tune_spec,
+  best_auc
+)
+```
+
+# Check features importance from the final model
+```{r}
+library(vip)
+final_rf %>% 
+  set_engine("ranger", importance = "permutation") %>% 
+  fit(legal_status ~.,
+      data = juice(tree_prep) %>% select(-tree_id)) %>% 
+  vip(geom = "point")
+```
+The private caretaker characteristic is important in categorization, as is latitude and longitude. Interestingly, we also see year (i.e. age of the tree) has higher importance too.
+# Check the performance of this model on the test data
+```{r}
+final_wf <- workflow() %>% 
+  add_recipe(tree_rec) %>% 
+  add_model(final_rf)
+
+final_res <- final_wf %>% 
+  last_fit(trees_split)
+
+final_res %>% 
+  collect_metrics()
+```
+The metrics fr the test set look good and indicate that our model didn't overfit during hyperparameter tuning.
+
+- Check predictions and visualize in the map to see where our model works well. This allows us to inspect the model and location further
+```{r}
+final_res %>% 
+  collect_predictions() %>% 
+  mutate(correct = case_when(legal_status == .pred_class ~ "Correct",
+                             TRUE ~ "Incorrect")) %>% 
+  bind_cols(trees_test) %>%
+  ggplot(aes(longitude, latitude, color = correct)) + 
+  geom_point(size = 0.5, alpha = 0.5) + 
+  labs(color = NULL) + 
+  scale_color_manual(values = c("gray80", "darkred"))
+```
+
