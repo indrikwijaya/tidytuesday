@@ -1,21 +1,26 @@
 ---
-title: "Untitled"
+title: "US-dairy analysis"
 output: html_document
 editor_options: 
   chunk_output_type: console
 ---
+## Inspired by David Robinson
 
+We would like to analyze US-dairy data, particularly on consumption of dairy products as well as cheese production. Details of this series can be found here [us-dairy](https://github.com/rfordatascience/tidytuesday/tree/master/data/2019/2019-01-29). There are some other datasets for this series of tidytuesday, but we will only look at two datasets.
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
+# Get data from tidytuesday repo
 ```{r}
 library(tidyverse)
 theme_set(theme_light())
 milk_products_facts <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-01-29/milk_products_facts.csv")
-
+cheese <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-01-29/clean_cheese.csv")
 ```
 
+# Milk Product Data
+We first are going to look at the milk product facts. The data has a typical format that needs to be gathered. We also need to separate product into product and category for more focused analysis.  
 ```{r}
 milk_products_tidied <- milk_products_facts %>% 
   gather(product, lbs_per_person, -year) %>% 
@@ -25,7 +30,11 @@ milk_products_tidied <- milk_products_facts %>%
          product = str_to_title(str_replace_all(product, "_", " ")),
          category = str_to_title(category),
          product = ifelse(product == "Other", paste(product, category), product))
+```
 
+## Daily consumption by category
+Now, we will plot daily consumption of dairy products by category.
+```{r}
 milk_products_tidied %>% 
   group_by(category, year) %>% 
   summarise(lbs_per_person = sum(lbs_per_person)) %>% 
@@ -35,30 +44,46 @@ milk_products_tidied %>%
        subtitle = "Based on US consumption (source: USDA)",
        x = "Year",
        y = "Lbs per person")
+```
+There is nothing striking here and it's very hard to compare different categories as they have similar trends, except for 'Fluid', which can be considered as an outlier.
 
+## Daily consumption by product
+```{r}
 milk_products_tidied %>% 
   group_by(product = fct_lump(product, 6, w = lbs_per_person),
            year) %>% 
   summarise(lbs_per_person = sum(lbs_per_person)) %>% 
   ggplot(aes(year, lbs_per_person, color = product)) +
   geom_line()
+```
+Similar to previous analysis on different categories, it's hard to observe any meaningful trend. So, we will consider using facet_wrap to zoom in more closely.
 
+```{r}
 milk_products_tidied %>% 
   ggplot(aes(year, lbs_per_person)) +
   geom_line() + 
   facet_wrap(~ product, scales="free") +
   expand_limits(y = 0)
+```
+We now are able to see more observable trend for different products. Yet, the data may not be useful for time-series forecasting as we don't observe any seasonal trend on any products.
 
+We will observe how different categorys and products change for different decades. It's expected that we won't see any observable trend since 'Milk' dominates the analysis. So, we can choose not to display 'Milk'.
+```{r}
 milk_products_tidied %>% 
-  filter(year == max(year)) %>% 
+  filter(year %in% c(1980, 1990, 2000, 2010),
+         product != "Milk") %>% 
   mutate(product = fct_reorder(product, lbs_per_person, sum)) %>% 
   ggplot(aes(product, lbs_per_person, fill = category)) + 
+  facet_wrap(~ year) +
   geom_col() + 
   coord_flip() +
   labs(x = "",
        y = "Pounds consumed per US person in 2017")
 ```
+Interestingly, we can see more consumption of 'Other Cheese', 'American' and 'Yogurt'.
 
+## Forecasting
+We did mention earlier that the data may not be good for forecasting due to the lack of seasonal trend. Nonetheless, this can be a good practice to use some libraries for time-series forecasting such as timetk and sweep.
 ```{r}
 library(sweep)
 library(timetk)
@@ -100,7 +125,7 @@ sw_augment seems to overfit the data
 No seasonal trend --> not good for forecasting
 
 ```{r}
-cheese <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-01-29/clean_cheese.csv")
+
 cheese_tidied <- cheese %>%
   gather(type, lbs_per_person, -Year) %>%
   rename(year = Year) %>%
