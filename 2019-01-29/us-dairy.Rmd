@@ -74,13 +74,15 @@ milk_product_ets <- milk_product_ts %>%
   mutate(model = map(ts, ets))
 
 milk_product_ets %>%
-  unnest(map(model, sw_glance))
+  mutate(glanced = map(model, sw_glance)) %>% 
+  unnest(glanced)
 
 milk_product_ts %>%
   crossing(model_name = c("auto.arima", "ets")) %>%
   mutate(model = map2(model_name, ts, ~ invoke(.x, list(.y))),
          forecast = map(model, forecast, h = 10)) %>%
-  unnest(nested = map(forecast, sw_sweep)) %>%
+  mutate(sweep = map(forecast, sw_sweep)) %>%
+  unnest(sweep) %>% 
   ggplot(aes(index, lbs_per_person, color = model_name, lty = key)) +
   geom_line() +
   geom_ribbon(aes(ymin = lo.80, ymax = hi.80), alpha = .5) +
@@ -120,7 +122,8 @@ cheese_ts %>%
   crossing(model_name = c("auto.arima", "ets")) %>%
   mutate(model = map2(model_name, ts, ~ invoke(.x, list(.y))),
          forecasted = map(model, forecast::forecast, h = 10)) %>%
-  unnest(map(forecasted, sw_sweep)) %>%
+  mutate(sweep = map(model, sw_sweep)) %>% 
+  unnest(sweep) %>%
   ggplot(aes(index, lbs_per_person, color = model_name, lty = key)) +
   geom_line() +
   geom_ribbon(aes(ymin = lo.80, ymax = hi.80), alpha = .5) +
