@@ -6,7 +6,7 @@ editor_options:
 ---
 ## Inspired by David Robinson
 
-We would like to analyze US-dairy data, particularly on consumption of dairy products as well as cheese production. Details of this series can be found here [us-dairy](https://github.com/rfordatascience/tidytuesday/tree/master/data/2019/2019-01-29). There are some other datasets for this series of tidytuesday, but we will only look at two datasets.
+We would like to analyze US-dairy data, particularly on consumption of dairy products as well as cheese products. Details of this series can be found here [us-dairy](https://github.com/rfordatascience/tidytuesday/tree/master/data/2019/2019-01-29). There are some other datasets for this series of tidytuesday, but we will only look at two datasets.
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
@@ -45,6 +45,7 @@ milk_products_tidied %>%
        x = "Year",
        y = "Lbs per person")
 ```
+
 There is nothing striking here and it's very hard to compare different categories as they have similar trends, except for 'Fluid', which can be considered as an outlier.
 
 ## Daily consumption by product
@@ -56,6 +57,7 @@ milk_products_tidied %>%
   ggplot(aes(year, lbs_per_person, color = product)) +
   geom_line()
 ```
+
 Similar to previous analysis on different categories, it's hard to observe any meaningful trend. So, we will consider using facet_wrap to zoom in more closely.
 
 ```{r}
@@ -65,6 +67,7 @@ milk_products_tidied %>%
   facet_wrap(~ product, scales="free") +
   expand_limits(y = 0)
 ```
+
 We now are able to see more observable trend for different products. Yet, the data may not be useful for time-series forecasting as we don't observe any seasonal trend on any products.
 
 We will observe how different categorys and products change for different decades. It's expected that we won't see any observable trend since 'Milk' dominates the analysis. So, we can choose not to display 'Milk'.
@@ -84,7 +87,7 @@ Interestingly, we can see more consumption of 'Other Cheese', 'American' and 'Yo
 
 ## Forecasting
 We did mention earlier that the data may not be good for forecasting due to the lack of seasonal trend. Nonetheless, this can be a good practice to use some libraries for time-series forecasting such as timetk and sweep.
-```{r}
+```{r, out.width = '100%'}
 library(sweep)
 library(timetk)
 library(lubridate)
@@ -119,12 +122,17 @@ milk_product_ts %>%
        y = "Average US consumption (lbs per person)",
        title = "Forecasted consumption of dairy products",
        subtitle = "Based on USDA data 1975-2017. Showing 80% prediction intervals.",
-       color = "Model")
+       color = "Model") +
+  theme(legend.position = c(0.7, 0.1),
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 14)) 
 ```
-sw_augment seems to overfit the data
-No seasonal trend --> not good for forecasting
 
-```{r}
+We can observe that auto.arima and ets have different forecasting results. For some products, such as 'Other Frozen', 'Nonfat', auto.arima seems to be the betetr model and has lower 80% prediction intervals.
+
+# Looking at Cheese data
+We will perform similar analysis that we did earlier for milk products to cheese data.
+```{r, out.width = '100%'}
 
 cheese_tidied <- cheese %>%
   gather(type, lbs_per_person, -Year) %>%
@@ -136,7 +144,8 @@ cheese_tidied %>%
   ggplot(aes(year, lbs_per_person)) +
   geom_line() +
   facet_wrap(~ type, scales = "free_y") +
-  expand_limits(y = 0)
+  expand_limits(y = 0) +
+  theme(axis.text.x = element_text(angle = 45))
 
 cheese_ts <- cheese_tidied %>%
   mutate(year = as.Date("0001-01-01") + years(year - 1)) %>%
@@ -158,9 +167,15 @@ cheese_ts %>%
   scale_linetype_discrete(guide = FALSE) +
   labs(x = "Year",
        y = "Average US consumption (lbs per person)",
-       title = "Forecasted consumption of dairy products",
+       title = "Forecasted consumption of cheese products",
        subtitle = "Based on USDA data 1975-2017. Showing 80% prediction intervals.",
-       color = "Model")
+       color = "Model") +
+  guides(color = FALSE)
 ```
 
-- possible improvement: create shiny app for people to explore different cheese
+
+- Due to the missing data for 'Blue' cheese, the forecasting result for it isn't really useful at all. We may need to do something and look deeper into the data as there are quite a lot of missing values. 
+
+## Possible improvement: 
+- Create shiny app for people to explore different cheese
+- Create function to make codes more efficient
