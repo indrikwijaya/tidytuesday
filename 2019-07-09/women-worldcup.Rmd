@@ -1,0 +1,96 @@
+---
+title: "women-worldcup"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180,
+                      fig.width = 12, fig.height = 5)
+library(tidyverse)
+library(ggthemes)
+theme_set(theme_light())
+```
+
+## Inspired by David Robinson
+
+```{r}
+wwc_outcomes <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-07-09/wwc_outcomes.csv")
+squads <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-07-09/squads.csv")
+codes <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-07-09/codes.csv")
+
+outcomes <- wwc_outcomes %>% 
+  left_join(codes, by = "team") %>% 
+  group_by(year, yearly_game_id) %>% 
+  mutate(opposing_score = rev(score)) %>% 
+  ungroup() %>% 
+  mutate(won_by = score - opposing_score)
+```
+
+### Web scrapping from wikipedia to get the country name (FIFA)
+```{r}
+library(rvest)
+# Leave this code as a web scraping example
+fifa_country_codes <- read_html("https://simple.wikipedia.org/wiki/List_of_FIFA_country_codes") %>%
+  html_nodes("table") %>%
+  map(html_table, fill = TRUE) %>%
+  .[2:5] %>%
+  bind_rows() %>%
+  tbl_df() %>%
+  select(country = Country, team = Code)
+```
+
+```{r}
+wwc_outcomes %>% 
+  left_join(codes, by = "team") %>% 
+  ggplot(aes(score)) + 
+  geom_histogram() + 
+  facet_wrap(~ win_status)
+
+outcomes %>% 
+  filter(year == 2019) %>% 
+  count(round, sort = TRUE)
+
+# of the 3 games each country plays in the "group" round, how did they win by on average?
+avg_group_scores <- outcomes %>% 
+  filter(round == "Group") %>% 
+  group_by(year, team) %>%
+  summarize(avg_group_score = mean(score),
+            avg_group_won_by = mean(won_by),
+            games = n()) %>% 
+  ungroup()
+
+# team that scores more in group tends to win in the final
+outcomes %>% 
+  inner_join(avg_group_scores, by = c("year", "team")) %>% 
+  filter(round == "Final") %>% 
+  ggplot(aes(country, avg_group_won_by, fill = win_status)) + 
+  geom_col() +
+  facet_wrap(~ year, scales = "free_x") +
+  labs(title = "Does performance in the group round predict the winner of the finals?",
+       subtitle = "Yes in all years except 2011. (2015 had been tied)",
+       y = "Average # of goals the team had won by in the Group round",
+       x = "Country",
+       fill = "Result")
+```
+
+Apply a formula: take the ave # of goals each had won by in the Group rounds. Then take the difference in those numbers, and predict that that's the differencein the playoff scores.
+```{r}
+outcomes %>% 
+  inner_join(avg_group_scores, by = c("year", "team")) %>% 
+  filter(round != "Group") %>% 
+  group_by(year, yearly_game_id) %>% 
+  mutate(difference = diff(avg_group_won_by)) %>% 
+  filter(team_num == 2) %>% 
+  mutate(round = fct_reorder(round, round, length)) %>% 
+  ggplot(aes(difference, won_by)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  geom_abline(color = "red") + 
+  facet_wrap(~ round) + 
+  labs(x = "Difference in the team's average Group score from their opponent",
+       y = "How much they won by",
+       title = "Can we use a team's performance in the Group round to predict finals performance?",
+       subtitle = "From 1991-2019")
+```
