@@ -9,7 +9,7 @@ date: 2020-05-12
 ## Inspired by Julia Silge
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180,
-                      cache = TRUE, fig.width = 8, fig.height = 5)
+                      cache = TRUE, fig.width = 12, fig.height = 5)
 library(tidyverse)
 library(tidymodels)
 theme_set(theme_light())
@@ -63,7 +63,7 @@ ggplot() +
 
 ```{r}
 library(tidymodels)
-volcano_boot <- bootstraps(volcano_df)
+volcano_boot <- bootstraps(volcano_df, times = 500)
 volcano_boot
 ```
 
