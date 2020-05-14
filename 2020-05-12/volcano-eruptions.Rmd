@@ -1,0 +1,166 @@
+---
+title: "volcano-eruptions"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+date: 2020-05-12
+---
+
+## Inspired by Julia Silge
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180,
+                      cache = TRUE, fig.width = 8, fig.height = 5)
+library(tidyverse)
+library(tidymodels)
+theme_set(theme_light())
+```
+
+We are building a model from this week's #tidytuesday data set on [volcano eruptions](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-12/readme.md). What we are looking for will be building a multiclass random forest classifier to predict the type of volcano based on other volcano characteristics like latitude, longitude, tectonic setting, etc.
+
+## Explore the data
+```{r}
+volcano_raw <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/volcano.csv')
+
+volcano_raw %>% 
+  count(primary_volcano_type, sort = TRUE)
+```
+We only have <1000 data points yet 26 types, so we won't be looking at all the different types or compress the similar types. We will only consider 3 major types:
+- stratovolcano
+- shield volcano
+- the rest (other)
+
+```{r}
+volcano_df <- volcano_raw %>%
+  transmute(
+    volcano_type = case_when(
+      str_detect(primary_volcano_type, "Stratovolcano") ~ "Stratovolcano",
+      str_detect(primary_volcano_type, "Shield") ~ "Shield",
+      TRUE ~ "Other"
+    ),
+    volcano_number, latitude, longitude, elevation,
+    tectonic_settings, major_rock_1
+  ) %>%
+  mutate_if(is.character, factor)
+
+volcano_df %>%
+  count(volcano_type, sort = TRUE)
+```
+
+When we have spatial information, it's always good to display it in a map.
+```{r}
+world <- map_data("world")
+
+ggplot() +
+  geom_map(data = world, map = world,
+           aes(long, lat, map_id = region),
+           color = "white", fill = "gray50", alpha = 0.2) + 
+  geom_point(data = volcano_df,
+             aes(longitude, latitude, color = volcano_type),
+             alpha = 0.8)
+```
+
+## Build a model
+
+```{r}
+library(tidymodels)
+volcano_boot <- bootstraps(volcano_df)
+volcano_boot
+```
+
+themis package is typically used for imbalanced datasets, particularly using step_smote. Some features have too many values for such a small dataset and thus, we need to apply step_other for these variables.
+```{r}
+library(themis)
+
+volcano_rec <- recipe(volcano_type ~ ., data = volcano_df) %>% 
+  update_role(volcano_number, new_role = "Id") %>% 
+  step_other(tectonic_settings) %>% 
+  step_other(major_rock_1) %>% 
+  step_dummy(tectonic_settings, major_rock_1) %>% 
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_predictors()) %>% 
+  step_smote(volcano_type)
+
+volcano_prep <- prep(volcano_rec)
+```
+
+```{r}
+rf_spec <- rand_forest(trees = 1000) %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger")
+
+volcano_wf <- workflow() %>% 
+  add_recipe(volcano_rec) %>% 
+  add_model(rf_spec)
+
+volcano_wf
+```
+
+For any individual bootstrap, each recipe is evaluated and then the model as well. Thereafter, predictions are made.
+```{r}
+volcano_res <- fit_resamples(
+  volcano_wf,
+  resamples = volcano_boot,
+  control = control_resamples(save_pred = TRUE,
+                              verbose = TRUE)
+)
+```
+
+## Explore results
+How good our model is?
+```{r}
+volcano_res %>% 
+  collect_metrics()
+```
+
+```{r}
+volcano_res %>% 
+  collect_predictions() %>% 
+  conf_mat(volcano_type, .pred_class)
+```
+
+```{r}
+volcano_res %>% 
+  collect_predictions() %>% 
+  group_by(id) %>% 
+  ppv(volcano_type, .pred_class) %>% 
+  ggplot(aes(.estimate)) + geom_histogram(bins = 10)
+```
+
+Now, we are fitting the model into the original data to see features importance.
+```{r}
+library(vip)
+
+rf_spec %>% 
+  set_engine("ranger", importance = "permutation") %>% 
+  fit(volcano_type ~ .,
+      data = juice(volcano_prep) %>% 
+        select(-volcano_number) %>% 
+        janitor::clean_names()) %>% 
+  vip(geom = "point")
+```
+From this plot above, longitude and latitude are the biggest factors to affect volcano. Major rock basalt picro basalt is the next biggest impact on the prediction model. Given longitude and latitude as the most important features in this model, we can display this in a map again to see where our model predicts better. Furthermore, we can facet_wrap according to volcano type to observe which type and where they're predicted better by the model.
+
+```{r}
+volcano_pred <- volcano_res %>% 
+  collect_predictions() %>% 
+  mutate(correct = volcano_type == .pred_class) %>% 
+  left_join(volcano_df %>% mutate(.row = row_number()))
+```
+
+```{r}
+ggplot() +
+  geom_map(data = world, map = world,
+           aes(long, lat, map_id = region),
+           color = "white", fill = "gray50", alpha = 0.2) + 
+  stat_summary_hex(data = volcano_pred,
+                  aes(longitude, latitude, z = correct),
+                  fun = "mean", 
+                  alpha = 0.5, 
+                  size = 0.5, bins = 60) +
+  scale_fill_gradient(high = "cyan3", labels = scales::percent) +
+  #theme_void(base_family = "IBMPlexSans") +
+  labs(x = "longitude", y = "latitude", fill = "Percent classified\ncorrectly")
+```
+
+
+- Possible improvements: make a better projection, improve the models, add more boostrap samplings
