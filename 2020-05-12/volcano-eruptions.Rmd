@@ -158,7 +158,20 @@ ggplot() +
                   alpha = 0.5, 
                   size = 0.5, bins = 60) +
   scale_fill_gradient(high = "cyan3", labels = scales::percent) +
-  #theme_void(base_family = "IBMPlexSans") +
+  labs(x = "longitude", y = "latitude", fill = "Percent classified\ncorrectly")
+```
+```{r}
+ggplot() +
+  geom_map(data = world, map = world,
+           aes(long, lat, map_id = region),
+           color = "white", fill = "gray50", alpha = 0.2) + 
+  stat_summary_hex(data = volcano_pred,
+                  aes(longitude, latitude, z = correct),
+                  fun = "mean", 
+                  alpha = 0.5, 
+                  size = 0.5, bins = 60) +
+  facet_wrap(~ volcano_type) + 
+  scale_fill_gradient(high = "cyan3", labels = scales::percent) +
   labs(x = "longitude", y = "latitude", fill = "Percent classified\ncorrectly")
 ```
 
