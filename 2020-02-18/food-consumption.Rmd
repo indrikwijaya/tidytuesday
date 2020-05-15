@@ -105,22 +105,8 @@ food_country <- food_consumption %>%
 
 ```{r}
 food_country %>% 
-  filter(food_category == "Beef") %>% 
-ggplot() +
-  geom_map(map = world,
-           aes(long, lat, map_id = country, fill = consumption),
-           color = "white", alpha = 0.2)
+  filter(food_category == "Pork") %>% 
+  ggplot(aes(long, lat, group = group))+
+  geom_polygon(aes(fill = consumption), color = "white")+
+  scale_fill_viridis_c(option = "C")
 ```
-
-```{r}
-library(rworldmap)
-food_country <- joinCountryData2Map(food_consumption,
-                                    joinCode = "NAME",
-                                    nameJoinColumn = "country")
-  
-```
-
-```{r}
-mapCountryData(food_country, nameColumnToPlot="consumption", catMethod = "categorical")
-```
-

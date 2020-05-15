@@ -9,7 +9,7 @@ food_consumption <- readr::read_csv('https://raw.githubusercontent.com/rfordatas
 ui <- fluidPage(
   
   # Application title
-  titlePanel("Food Consumption by Country in 2018"),
+  titlePanel("Food Consumption & Co2 Emmission in 2018"),
   
   # Sidebar with a slider input for number of bins 
   sidebarLayout(
@@ -21,7 +21,8 @@ ui <- fluidPage(
     
     # Show a plot of the generated distribution
     mainPanel(
-      plotlyOutput("food_country", height = "700px")
+      plotlyOutput("food_country", height = "400px"),
+      plotlyOutput("emission_country", height = "400px")
     )
   )
 )
@@ -29,16 +30,33 @@ ui <- fluidPage(
 # Define server logic required to draw a histogram
 server <- function(input, output) {
   world <- map_data("world")
+  food_consumption <- food_consumption %>% 
+    mutate(Consumption = consumption,
+           Co2 = co2_emmission,
+           Country = country) %>% 
+    select(-consumption, -co2_emmission, -country)
+    
   output$food_country <- renderPlotly({
     p <- food_consumption %>% 
-      left_join(world %>% mutate(country = region), by = 'country') %>% 
+      left_join(world %>% mutate(Country = region), by = 'Country') %>% 
       filter(food_category == input$food_category) %>% 
-      ggplot() +
-      geom_map(map = world,
-               aes(long, lat, map_id = country, fill = consumption),
-               color = "white", alpha = 0.2)
-    ggplotly(p)
-  })
+      ggplot(aes(long, lat, group = group)) +
+      geom_polygon(aes(fill = Consumption), color = "white")+
+      scale_fill_viridis_c(option = "C") +
+      labs(x = "", y = "", fill = "Consumption\n(kg/person/year)")
+    ggplotly(p, tooltip = c("Country", "Consumption"))
+    })
+  
+    output$emission_country <- renderPlotly({
+      p <- food_consumption %>% 
+        left_join(world %>% mutate(Country = region), by = 'Country') %>% 
+        filter(food_category == input$food_category) %>% 
+        ggplot(aes(long, lat, group = group)) +
+        geom_polygon(aes(fill = Co2), color = "white")+
+        scale_fill_viridis_c(option = "C") +
+        labs(x = "", y = "", fill = "Co2 Emission\n(kg/person/year)")
+      ggplotly(p, tooltip = c("Country","Consumption"))
+      })
 }
 
 # Run the application 
