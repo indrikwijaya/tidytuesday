@@ -80,7 +80,7 @@ rf_grid <- tune_grid(
   resamples = food_boot)
 
 rf_grid
-)
+
 ```
 
 We can check our results
@@ -109,4 +109,9 @@ food_country %>%
   ggplot(aes(long, lat, group = group))+
   geom_polygon(aes(fill = consumption), color = "white")+
   scale_fill_viridis_c(option = "C")
+```
+
+```{r, echo = FALSE}
+shinyAppFile("/Users/indrikwijaya/Documents/tidytuesday/2020-02-18/app.R"
+)
 ```

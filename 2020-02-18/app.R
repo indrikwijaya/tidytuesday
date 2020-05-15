@@ -55,7 +55,7 @@ server <- function(input, output) {
         geom_polygon(aes(fill = Co2), color = "white")+
         scale_fill_viridis_c(option = "C") +
         labs(x = "", y = "", fill = "Co2 Emission\n(kg/person/year)")
-      ggplotly(p, tooltip = c("Country","Consumption"))
+      ggplotly(p, tooltip = c("Country", "Co2"))
       })
 }
 
