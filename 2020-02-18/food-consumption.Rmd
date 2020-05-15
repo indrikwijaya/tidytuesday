@@ -1,0 +1,126 @@
+---
+title: "food-consumption"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## Inspired by Julia Silge
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180,
+                      fig.width = 12, fig.height = 5)
+
+library(tidyverse)
+theme_set(theme_light())
+```
+
+This time round, we want to predict which countries are Asian countries, based on their patterns of food consumption in the eleven categories from [food consumption and CO2 emissions.](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-02-18/readme.md)
+
+
+```{r}
+food_consumption <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-02-18/food_consumption.csv')
+food_consumption
+```
+We have a long, tidy data which needs to be made wide for modeling. To identify the continent which each country resides in, we can use countrycode package. We will also create a new variable 'asia' for prediction that tells us whether a country is in Asia or not.
+
+```{r}
+library(janitor)
+library(countrycode)
+food <- food_consumption %>% 
+  select(-co2_emmission) %>% 
+  pivot_wider(names_from = food_category,
+              values_from = consumption) %>% 
+  clean_names() %>% 
+  mutate(continent = countrycode(country,
+                                 origin = "country.name",
+                                 destination = "continent")) %>% 
+  mutate(asia = case_when(continent == "Asia" ~ "Asia",
+                          TRUE ~ "Other")) %>% 
+  select(-country, -continent) %>% 
+  mutate_if(is.character, factor)
+food
+```
+We are left with quite a small dataset, but we will try to model this data to see how we can do hyperparameters tuning.
+
+```{r}
+library(GGally)
+ggscatmat(food, columns = 1:11, color = "asia", alpha = 0.7)
+```
+Notice how important rice is! Also see how the relationships between different food categories is different for Asian and non-Asian countries; a tree-based model like a random forest is good as learning interactions like this.
+
+## Hyperparameters tuning
+- Create a set of bootstrap resamples to use for tuning
+- Create a model specification for a random forest where we will tune mtry (# of predictors to sample at each split) and min_n (# of observations needed to keep splitting nodes). 
+
+```{r}
+library(tidymodels)
+set.seed(1234)
+food_boot <- bootstraps(food, times = 30)
+food_boot
+```
+
+```{r}
+rf_spec <- rand_forest(
+  mode = "classification",
+  mtry = tune(),
+  trees = 1000,
+  min_n = tune()) %>% 
+  set_engine("ranger")
+
+rf_spec
+```
+
+Here, we will use grid search to train many models. Furthermore, we can do parallel processing to speed up our training.
+```{r}
+doParallel::registerDoParallel()
+
+rf_grid <- tune_grid(
+  asia ~. ,
+  model = rf_spec,
+  resamples = food_boot)
+
+rf_grid
+)
+```
+
+We can check our results
+```{r}
+rf_grid %>% 
+  collect_metrics()
+```
+
+And to see which model performed best in terms of 'accuracy' or 'roc_auc'.
+```{r}
+rf_grid %>% 
+  show_best("roc_auc")
+```
+
+
+```{r}
+world <- map_data("world")
+
+food_country <- food_consumption %>% 
+  left_join(world %>% mutate(country = region), by = 'country')
+```
+
+```{r}
+food_country %>% 
+  filter(food_category == "Beef") %>% 
+ggplot() +
+  geom_map(map = world,
+           aes(long, lat, map_id = country, fill = consumption),
+           color = "white", alpha = 0.2)
+```
+
+```{r}
+library(rworldmap)
+food_country <- joinCountryData2Map(food_consumption,
+                                    joinCode = "NAME",
+                                    nameJoinColumn = "country")
+  
+```
+
+```{r}
+mapCountryData(food_country, nameColumnToPlot="consumption", catMethod = "categorical")
+```
+
