@@ -1,5 +1,6 @@
 ---
 title: "food-consumption"
+runtime: shiny
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -11,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180,
                       fig.width = 12, fig.height = 5)
 
 library(tidyverse)
+library(shiny)
 theme_set(theme_light())
 ```
 
