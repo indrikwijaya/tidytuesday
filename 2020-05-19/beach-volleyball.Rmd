@@ -107,7 +107,7 @@ xgb_grid <- grid_latin_hypercube(
   sample_size = sample_prop(),
   finalize(mtry(), vb_train),
   learn_rate(),
-  size = 10 #can increase the size
+  size = 30 #can increase the size
 )
 xgb_grid
 ```
@@ -121,7 +121,7 @@ xgb_wf
 
 ```{r}
 set.seed(123)
-vb_folds <- vfold_cv(vb_train, strata = win, v = 5)
+vb_folds <- vfold_cv(vb_train, strata = win, v = 10)
 vb_folds
 ```
 
