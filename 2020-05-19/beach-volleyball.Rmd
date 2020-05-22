@@ -1,0 +1,206 @@
+---
+title: ''
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## Inspired by Julia Silge
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180,
+                      fig.width = 8, fig.height = 5)
+library(tidyverse)
+theme_set(theme_light())
+
+```
+
+We would like to try XGBoost on this dataset. XGBoost doesn't require a lot of preprocessing of the data, yet it has a lot of hyperparameters to tune. 
+```{r}
+# Get the Data
+
+vb_matches <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-19/vb_matches.csv', guess_max = 76000)
+```
+
+```{r}
+vb_parsed <- vb_matches %>% 
+  transmute(
+    circuit,
+    gender,
+    year,
+    w_attacks = w_p1_tot_attacks + w_p2_tot_blocks,
+    w_kills = w_p1_tot_kills + w_p2_tot_kills,
+    w_errors = w_p1_tot_errors + w_p2_tot_errors,
+    w_aces = w_p1_tot_aces + w_p2_tot_aces,
+    w_serve_errors = w_p1_tot_serve_errors + w_p2_tot_serve_errors,
+    w_blocks = w_p1_tot_blocks + w_p2_tot_blocks,
+    w_digs = w_p1_tot_digs + w_p2_tot_digs,
+   
+    l_attacks = l_p1_tot_attacks + l_p2_tot_blocks,
+    l_kills = l_p1_tot_kills + l_p2_tot_kills,
+    l_errors = l_p1_tot_errors + l_p2_tot_errors,
+    l_aces = l_p1_tot_aces + l_p2_tot_aces,
+    l_serve_errors = l_p1_tot_serve_errors + l_p2_tot_serve_errors,
+    l_blocks = l_p1_tot_blocks + l_p2_tot_blocks,
+    l_digs = l_p1_tot_digs + l_p2_tot_digs
+  ) %>% 
+  na.omit()
+
+winners <- vb_parsed %>% 
+  select(circuit, gender, year,
+         w_attacks:w_digs) %>% 
+  rename_at(vars(starts_with("w_")), list(~ str_remove_all(., "w_"))) %>% 
+  mutate(win = "win")
+
+losers <- vb_parsed %>% 
+  select(circuit, gender, year,
+         l_attacks:l_digs) %>% 
+  rename_at(vars(starts_with("l_")), list(~ str_remove_all(., "l_"))) %>% 
+  mutate(win = "lose")
+
+```
+
+```{r}
+vb_df <- bind_rows(winners, losers) %>% 
+  mutate_if(is.character, factor)
+```
+
+We can plot exploratory boxplots to see which features that may be interesting for our models.
+```{r}
+vb_df %>%
+  pivot_longer(attacks:digs, names_to = "stat", values_to = "value") %>% 
+  ggplot(aes(gender, value, fill = win, color = win)) + 
+  geom_boxplot(alpha = 0.4) +
+  facet_wrap(~stat, scales = "free_y", nrow = 2) +
+  labs(y = NULL, color = NULL, fill = NULL)
+```
+
+## Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+vb_split <- initial_split(vb_df, strata = win)
+vb_train <- training(vb_split)
+vb_test <- testing(vb_split)
+```
+
+```{r}
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(), 
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune(),
+  learn_rate = tune()
+) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xgb_spec
+```
+
+```{r}
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), vb_train),
+  learn_rate(),
+  size = 10 #can increase the size
+)
+xgb_grid
+```
+
+```{r}
+xgb_wf <- workflow() %>% 
+  add_formula(win ~ .) %>% 
+  add_model(xgb_spec)
+xgb_wf
+```
+
+```{r}
+set.seed(123)
+vb_folds <- vfold_cv(vb_train, strata = win, v = 5)
+vb_folds
+```
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(234)
+xgb_res <- tune_grid(
+  xgb_wf,
+  resamples = vb_folds,
+  grid = xgb_grid,
+  control = control_grid(save_pred = TRUE)
+)
+library(beepr)
+beep("treasure")
+```
+
+## Explore results
+We can plot roc-auc vs parameters to visualize how different values of each parameter affect roc-auc.
+```{r}
+xgb_res %>% 
+  collect_metrics() %>% 
+  filter(.metric == "roc_auc") %>% 
+  select(mean, mtry:sample_size) %>% 
+  pivot_longer(mtry:sample_size,
+               names_to = "parameter",
+               values_to = "value") %>% 
+  ggplot(aes(value, mean, color = parameter)) + 
+  geom_point(show.legend = FALSE) +
+  facet_wrap(~ parameter, scales = "free_x")
+```
+Remember: space-filling design --> can't pick the best combinations like how we normally do using regular grid
+- tree_depth: deep trees
+- learn_rate: lower the better
+- min_n: not so high
+- mtry: 6
+- sample_size: small
+- loss_reductionL not really clear
+
+```{r}
+show_best(xgb_res, "roc_auc")
+best_auc <- select_best(xgb_res, "roc_auc")
+
+xgb_final <- finalize_workflow(xgb_wf, best_auc)
+xgb_final
+```
+
+Now, we can look at feature importance.
+```{r}
+library(vip)
+
+xgb_final %>% 
+  fit(data = vb_train) %>% 
+  pull_workflow_fit() %>% 
+  vip(geom = "point")
+```
+
+Errors and Kills have the highest relative importance as compared to other features.
+
+Finally, we can evaluate the performance of this xgboost model to our test data.
+```{r}
+final_res <- last_fit(xgb_final, vb_split)
+
+final_res %>% 
+  collect_metrics()
+```
+
+Since the difference between roc-auc for training and test set is not that high, we can safely assume that our model does not overfit our data.
+
+```{r}
+final_res %>% 
+  collect_predictions() %>% 
+  roc_curve(win, .pred_win) %>% 
+  ggplot(aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(size = 1.5, color = "coral") +
+  geom_abline(
+    lty = 2, alpha = 0.5,
+    color = "gray50",
+    size = 1.2
+  )
+```
+
