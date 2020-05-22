@@ -179,7 +179,7 @@ xgb_final %>%
   vip(geom = "point")
 ```
 
-Errors and Kills have the highest relative importance as compared to other features.
+Errors and Kills have the highest relative importance as compared to other features. Surprisingly, attacks which seems to be not that important from our boxplot, becomes the 3rd most important feature.
 
 Finally, we can evaluate the performance of this xgboost model to our test data.
 ```{r}
