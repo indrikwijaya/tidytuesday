@@ -1,0 +1,131 @@
+---
+title: "cocktail"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180,
+                      cache = TRUE, fig.width = 12, fig.height = 5)
+library(tidyverse)
+theme_set(theme_light())
+```
+
+## Inspired by Julia Silge
+
+The data for this analysis comes from #tidytuesday dataset on [cocktail recipes](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-26/readme.md). We'll perform an unsupervised dimensionality reduction on different cocktail recipes. As mentioned in the source website, we need to pay attention to the measure column.
+
+## Exploratory Data Analysis
+
+```{r}
+boston_cocktails <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-26/boston_cocktails.csv')
+
+```
+
+```{r}
+boston_cocktails %>% count(ingredient, sort = TRUE)
+```
+Looking at the ingredient column, we may need to do some more data clean up. Some terms are in lower cases, upper cases, etc which make this column inconsistent. Furthermore, we will look at the measure column.
+
+```{r}
+cocktails_parsed <- boston_cocktails %>%
+  mutate(
+    ingredient = str_to_lower(ingredient),
+    ingredient = str_replace_all(ingredient, "-", " "),
+    ingredient = str_remove(ingredient, " liqueur$"),
+    ingredient = str_remove(ingredient, " (if desired)$"),
+    ingredient = case_when(
+      str_detect(ingredient, "bitters") ~ "bitters",
+      str_detect(ingredient, "lemon") ~ "lemon juice",
+      str_detect(ingredient, "lime") ~ "lime juice",
+      str_detect(ingredient, "grapefruit") ~ "grapefruit juice",
+      str_detect(ingredient, "orange") ~ "orange juice",
+      TRUE ~ ingredient
+    ),
+    measure = case_when(
+      str_detect(ingredient, "bitters") ~ str_replace(measure, "oz$", "dash"), # make assumption on bitters measurement, there may be some error on collecting this bitter measurement
+      TRUE ~ measure
+    ),
+    measure = str_replace(measure, " ?1/2", ".5"),
+    measure = str_replace(measure, " ?3/4", ".75"),
+    measure = str_replace(measure, " ?1/4", ".25"),
+    measure_number = parse_number(measure),
+    measure_number = if_else(str_detect(measure, "dash$"),
+      measure_number / 50,
+      measure_number
+    )
+  ) %>%
+  add_count(ingredient) %>%
+  filter(n > 15) %>%
+  select(-n) %>%
+  distinct(row_id, ingredient, .keep_all = TRUE) %>%
+  na.omit()
+
+cocktails_parsed
+```
+
+```{r}
+cocktails_df <- cocktails_parsed %>%
+  select(-ingredient_number, -row_id, -measure) %>%
+  pivot_wider(names_from = ingredient, values_from = measure_number, values_fill = list(measure_number = 0)) %>%
+  janitor::clean_names() %>%
+  na.omit()
+
+cocktails_df
+```
+
+## Principal Component Analysis
+```{r}
+library(tidymodels)
+
+pca_rec <- recipe(~ ., data = cocktails_df) %>% 
+  update_role(name, category, new_role = "id") %>% 
+  step_normalize(all_predictors()) %>% 
+  step_pca(all_predictors())
+pca_rec
+
+pca_prep <- prep(pca_rec)
+pca_prep
+```
+
+```{r}
+tidied_pca <- tidy(pca_prep, 2)
+
+tidied_pca %>% 
+  filter(component %in% paste0("PC", 1:5)) %>% 
+  mutate(component = fct_inorder(component)) %>% 
+  ggplot(aes(value, terms, fill = terms)) + 
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~component, nrow = 1) + 
+  labs(y =NULL)
+```
+- PC1: powdered sugar vs. simple syrup; recipes are not likely to have both.
+Let’s zoom in on the first four components, and understand which cocktail ingredients contribute in the positive and negative directions.
+
+
+```{r}
+# need to reorder again, so it'll be sorted based on values
+tidied_pca %>% 
+  filter(component %in% paste0("PC", 1:4)) %>%
+  group_by(component) %>% 
+  top_n(8, abs(value)) %>% 
+  ungroup() %>% 
+  ggplot(aes(reorder(terms, abs(value)), abs(value), fill = value > 0)) +
+  geom_bar(stat="identity") + 
+  coord_flip() + 
+  facet_wrap(~component, scales = "free_y") +
+  labs(y = NULL, x = NULL, fill = "Positive?")
+```
+- PC1: powdered sugar + egg + gin drinks vs. simple syrup + lime + tequila drinks. This is the component that explains the most variation in drinks. 
+- PC2: mostly about vermouth, both sweet and dry.
+```{r}
+juice(pca_prep) %>%
+  ggplot(aes(PC1, PC2, label = name)) +
+  geom_point(aes(color = category), alpha = 0.7, size = 2) +
+  geom_text(check_overlap = TRUE, hjust = "inward", family = "IBMPlexSans") +
+  labs(color = NULL)
+```
+
+
+
