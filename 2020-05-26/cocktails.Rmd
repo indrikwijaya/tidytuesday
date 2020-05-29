@@ -174,5 +174,39 @@ juice(umap_prep) %>%
 ```
 
 ## t-SNE
-t-SNE is also another increasingly popular method to do dimensionality reduction. 
+t-SNE is also another increasingly popular method to do dimensionality reduction. Inspired by (Joshua Cook's analysis)[https://github.com/jhrcook/tidy-tuesday/blob/master/2020-05-26_cocktails.md], we'll use Rtsne library to run t-SNE analysis.
+```{r}
+library(Rtsne)
+tsne_cocktails <- Rtsne(cocktails_df, perplexity = 5, check_duplicates = FALSE)
+
+tsne_cocktails_tib <- as_tibble(tsne_cocktails$Y) %>%
+    set_names(c("z1", "z2")) %>%
+    mutate(category = cocktails_df$category)
+```
+Let's visualize our t-SNE results
+```{r}
+tsne_cocktails_summary <- tsne_cocktails_tib %>%
+    group_by(category) %>%
+    summarise(avg_z1 = mean(z1), avg_z2 = mean(z2)) %>%
+    ungroup()
+
+tsne_cocktails_tib %>%
+    ggplot(aes(z1, z2)) +
+    geom_point(aes(color = category)) +
+    geom_label(aes(label = category, x = avg_z1, y = avg_z2),
+               data = tsne_cocktails_summary,
+               label.size = 0, 
+               label.padding = unit(1, "mm"),
+               fill = "white", 
+               fontface = "bold",
+               alpha = 0.8) +
+    #scale_color_brewer(palette = "Set2") +
+    theme(
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "none"
+    ) +
+    labs(x = "Dim 1",
+         y = "Dim 2",
+         title = "PCA and t-SNE of drinks by ingredients")
+```
 
