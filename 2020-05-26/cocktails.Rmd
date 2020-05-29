@@ -76,6 +76,7 @@ cocktails_df
 ```
 
 ## Principal Component Analysis
+We can use the commonly used prcomp for PCA analysis, but we'll follow (Julia Silge's approach)[https://juliasilge.com/blog/cocktail-recipes-umap/] which uses tidymodels. This is also easily extendable/usable for other models.
 ```{r}
 library(tidymodels)
 
@@ -119,13 +120,59 @@ tidied_pca %>%
 ```
 - PC1: powdered sugar + egg + gin drinks vs. simple syrup + lime + tequila drinks. This is the component that explains the most variation in drinks. 
 - PC2: mostly about vermouth, both sweet and dry.
+
+We can then observe more specifically PC1 and PC2.
 ```{r}
 juice(pca_prep) %>%
   ggplot(aes(PC1, PC2, label = name)) +
   geom_point(aes(color = category), alpha = 0.7, size = 2) +
-  geom_text(check_overlap = TRUE, hjust = "inward", family = "IBMPlexSans") +
+  geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+```
+- Fizzy, egg, powdered sugar drinks are to the left.
+- Simple syrup, lime, tequila drinks are to the right.
+- Vermouth drinks are more to the top.
+
+Let's look at PC2 and PC3.
+```{r}
+juice(pca_prep) %>%
+  ggplot(aes(PC2, PC3, label = name)) +
+  geom_point(aes(color = category), alpha = 0.7, size = 2) +
+  geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+```
+It's less obvious as compared to PC1 and PC2. How about PC1 and PC3?
+```{r}
+juice(pca_prep) %>%
+  ggplot(aes(PC1, PC3, label = name)) +
+  geom_point(aes(color = category), alpha = 0.7, size = 2) +
+  geom_text(check_overlap = TRUE, hjust = "inward") +
+  labs(color = NULL)
+```
+Most of cocktail classics are found on the left. We can explore further on different combinations of principal components.
+
+## UMAP
+```{r}
+library(embed)
+
+umap_rec <- recipe(~., data = cocktails_df) %>%
+  update_role(name, category, new_role = "id") %>%
+  step_normalize(all_predictors()) %>%
+  step_umap(all_predictors())
+
+umap_prep <- prep(umap_rec)
+
+umap_prep
+```
+We can also do similar analysis just like what we had for PCA i.e. analysing the different principal components (UMAP components here).
+```{r}
+juice(umap_prep) %>%
+  ggplot(aes(umap_1, umap_2, label = name)) +
+  geom_point(aes(color = category), alpha = 0.7, size = 2) +
+  geom_text(check_overlap = TRUE, hjust = "inward") +
   labs(color = NULL)
 ```
 
-
+## t-SNE
+t-SNE is also another increasingly popular method to do dimensionality reduction. 
 
