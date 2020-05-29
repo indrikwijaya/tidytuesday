@@ -14,7 +14,7 @@ theme_set(theme_light())
 
 ## Inspired by Julia Silge
 
-The data for this analysis comes from #tidytuesday dataset on [cocktail recipes](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-26/readme.md). We'll perform an unsupervised dimensionality reduction on different cocktail recipes. As mentioned in the source website, we need to pay attention to the measure column.
+The data for this analysis comes from #tidytuesday dataset on [cocktail recipes](https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-05-26/readme.md). We'll perform different unsupervised dimensionality reduction methods on different cocktail recipes. As mentioned in the source website, we need to pay attention to the measure column.
 
 ## Exploratory Data Analysis
 
@@ -76,7 +76,7 @@ cocktails_df
 ```
 
 ## Principal Component Analysis
-We can use the commonly used prcomp for PCA analysis, but we'll follow (Julia Silge's approach)[https://juliasilge.com/blog/cocktail-recipes-umap/] which uses tidymodels. This is also easily extendable/usable for other models.
+We can use the commonly used prcomp for PCA analysis, but we'll follow [Julia Silge's approach](https://juliasilge.com/blog/cocktail-recipes-umap/) which uses tidymodels. This is also easily extendable/usable for other models.
 ```{r}
 library(tidymodels)
 
@@ -174,7 +174,7 @@ juice(umap_prep) %>%
 ```
 
 ## t-SNE
-t-SNE is also another increasingly popular method to do dimensionality reduction. Inspired by (Joshua Cook's analysis)[https://github.com/jhrcook/tidy-tuesday/blob/master/2020-05-26_cocktails.md], we'll use Rtsne library to run t-SNE analysis.
+t-SNE is also another increasingly popular method to do dimensionality reduction. Inspired by [Joshua Cook's analysis](https://github.com/jhrcook/tidy-tuesday/blob/master/2020-05-26_cocktails.md), we'll use Rtsne library to run t-SNE analysis.
 ```{r}
 library(Rtsne)
 tsne_cocktails <- Rtsne(cocktails_df, perplexity = 5, check_duplicates = FALSE)
@@ -209,4 +209,4 @@ tsne_cocktails_tib %>%
          y = "Dim 2",
          title = "PCA and t-SNE of drinks by ingredients")
 ```
-
+We can observe some clear separate clusters, but some categories like Vodka should not be close to Non-alcoholic drinks. We can tune around the different parameters that t-SNE algorithm has such as its perplexity, but what we currently have is good enough for basic data exploratory analysis. 
