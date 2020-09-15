@@ -1,0 +1,93 @@
+---
+title: "Global Crop Yield"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180)
+library(tidyverse)
+theme_set(theme_light())
+```
+
+### Inspired by Julia Silge
+For this week's tidytuesday data on [global crop yields around the world] (https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-09-01/readme.md), we want to create a model that will estimate how crop yields are changing around the world. There are 5 different data, but we will not look at all of them. 
+
+## Data Exploration
+We first get the data from the link above. For this analysis, we'll only use key_crop_yields and land_use data.
+```{r, include=FALSE}
+key_crop_yields <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-01/key_crop_yields.csv')
+land_use <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-01/land_use_vs_yield_change_in_cereal_production.csv')
+
+```
+
+Again, we will only be looking on some countries which will be done based on  population.
+
+```{r, include=FALSE}
+top_countries <- 
+  land_use %>% 
+  janitor::clean_names() %>%
+  filter(!is.na(code),
+         entity != 'World') %>% 
+  group_by(entity) %>% 
+  filter(year == max(year)) %>% 
+  ungroup() %>% 
+  slice_max(total_population_gapminder, n = 30) %>% 
+  pull(entity)
+```
+
+We'll then combine this table with key_crop_yields and will only look at some crops that we're interested in.
+
+```{r}
+tidy_yields <- 
+  key_crop_yields %>%
+  janitor::clean_names() %>%
+  pivot_longer(wheat_tonnes_per_hectare:bananas_tonnes_per_hectare,
+    names_to = "crop", values_to = "yield") %>%
+  mutate(crop = str_remove(crop, "_tonnes_per_hectare")) %>%
+  filter(crop %in% c("wheat", "rice", "maize", "barley"),
+    entity %in% top_countries,
+    !is.na(yield))
+
+```
+
+```{r}
+tidy_yields %>% 
+  ggplot(aes(x = year, y = yield, color = crop)) + 
+  geom_line(alpha = 0.7, size = 1.5) + 
+  geom_point() + 
+  facet_wrap(~entity) + 
+  labs(x = NULL, y = "yield (tonnes/hectare)")
+```
+
+## Create Models
+```{r}
+library(tidymodels)
+
+tidy_lm <- 
+  tidy_yields %>% 
+  nest(yields = c(year, yield)) %>% 
+  mutate(model = map(yields, ~ lm(yield ~ year, data = .x)))
+
+slopes <- tidy_lm %>% 
+  mutate(coefs = map(model, tidy)) %>% 
+  unnest(coefs) %>% 
+  filter(term == "year") %>% 
+  mutate(p.value = p.adjust(p.value))
+```
+
+## Explore Results
+```{r}
+library(ggrepel)
+slopes %>% 
+  ggplot(aes(x = estimate, y = p.value, label = entity)) +
+  geom_vline(xintercept = 0, lty = 2, size = 1.5, alpha = 0.7,
+             color = 'gray') + 
+  geom_point(aes(color = crop), alpha = 0.8, size = 2.5,
+             show.legend = FALSE) + 
+  geom_text_repel(size = 3, family = "IBMPlexSans") +
+  facet_wrap(~ crop) +
+  scale_y_log10()
+```
+
