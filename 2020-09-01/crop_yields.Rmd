@@ -37,7 +37,7 @@ top_countries <-
   pull(entity)
 ```
 
-We'll then combine this table with key_crop_yields and will only look at some crops that we're interested in.
+We'll then combine this table with key_crop_yields and will only look at some crops that we're interested in. We also will transform the data into tidy format for easier downstream analysis.
 
 ```{r}
 tidy_yields <- 
@@ -52,6 +52,7 @@ tidy_yields <-
 
 ```
 
+We can visualize our data now to observe the change of crop yield over time.
 ```{r}
 tidy_yields %>% 
   ggplot(aes(x = year, y = yield, color = crop)) + 
@@ -60,8 +61,11 @@ tidy_yields %>%
   facet_wrap(~entity) + 
   labs(x = NULL, y = "yield (tonnes/hectare)")
 ```
+Notice that not all countires produce all crops for e.g. Indonesia, Vietnam and Philippines. But from this simple line plot, we can observe that overall crop yields are increasing.
 
 ## Create Models
+We will now fit a simple linear model for our data with dependent variable being year. We also will tidy our the output of the linear models to get out the coefficients that we want as well as perform multiple corrections on the p values.
+
 ```{r}
 library(tidymodels)
 
@@ -78,6 +82,7 @@ slopes <- tidy_lm %>%
 ```
 
 ## Explore Results
+Let's visualize the output
 ```{r}
 library(ggrepel)
 slopes %>% 
@@ -86,8 +91,10 @@ slopes %>%
              color = 'gray') + 
   geom_point(aes(color = crop), alpha = 0.8, size = 2.5,
              show.legend = FALSE) + 
-  geom_text_repel(size = 3, family = "IBMPlexSans") +
+  geom_text_repel(size = 3) +
   facet_wrap(~ crop) +
   scale_y_log10()
 ```
+- x-axis: gives us the slope of these models. Preliminary observation tells us that most countries have positive slope with increasing crop yields. Furthermore, the further to the right a country is, the larger the increase in crop yield over this time period. Lastly, corn yields have increased the most.
 
+- y-axis: gives the adjusted p-values, which measure how suprising the effect we see is under the assumption of no relationship (i.e. no change with time). Countries lower the plots have smaller adjusted p-values which have more certainty whether the relationships are real.
