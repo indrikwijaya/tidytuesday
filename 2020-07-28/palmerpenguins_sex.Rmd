@@ -1,0 +1,197 @@
+---
+title: "Palmer Penguins"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180)
+```
+
+### Inspired by Julia Silge
+For this week's #TidyTuesday dataset, we'll be looking at [palmerpenguins] (https://allisonhorst.github.io/palmerpenguins/), Antarctic penguins who live on the Palmer Archipelago. More details on this dataset can be found on the [RStudio Education blog] (https://education.rstudio.com/blog/2020/07/palmerpenguins-cran/). We would like to come up with a model that predicts the [sex of the penguins] (https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-07-28/readme.md) using a classification model, based on the other observations in the dataset i.e. supervised learning. Let's now load the dataset from `palmerpenguins` package.
+
+```{r}
+library(tidyverse)
+library(palmerpenguins)
+
+penguins
+```
+
+Since `penguins` is already in tidy format, we need not preprocess further to make it tidy. One natural thing that comes up for classification task is to predict for `species`. Yet, we will likely find an almost perfect fit, because these kinds of observations are actually what distinguish different species. We may want to look at another variable e.g. `species`.
+
+## Data Exploration
+```{r}
+penguins %>% 
+  filter(!is.na(sex)) %>% 
+  ggplot(aes(flipper_length_mm, bill_length_mm, color = sex, size = body_mass_g)) + 
+  geom_point(alpha = 0.5) + 
+  facet_wrap(~species) +
+  theme_bw()
+```
+
+- Generally, female penguins are lighter.
+
+```{r}
+penguins %>%
+  filter(!is.na(sex)) %>%
+  ggplot(aes(sex, fill = sex)) +
+  geom_bar() +
+  facet_wrap(~species) +
+  theme_bw()
+```
+
+- We have almost equal number of female and male birds for each species.
+
+```{r}
+penguins %>% 
+  filter(!is.na(sex)) %>% 
+  ggplot(aes(sex, fill = sex)) +
+  geom_bar() + 
+  facet_wrap(~island) + 
+  theme_bw()
+```
+
+- Again, the distribution of sexes is quite uniform for different islands.
+
+```{r}
+penguins %>% 
+  filter(!is.na(sex)) %>% 
+  ggplot(aes(island, fill = species)) +
+  geom_bar(position = 'dodge') +
+  theme_bw()
+```
+
+- Not all species are present in every island. We may then not include any modeling that tries to find the relationship between these two.
+
+For the preliminary modeling, we will not use year and island.
+```{r}
+penguins_df <-
+  penguins %>% 
+  filter(!is.na(sex)) %>% 
+  select(-year, -island)
+```
+
+
+## Build a model
+
+Firstly, we need to split our data into training and test sets.
+```{r}
+library(tidymodels)
+set.seed(123)
+penguin_split <- initial_split(penguins_df, strata = sex)
+penguin_train <- training(penguin_split) 
+penguin_test <- testing(penguin_split)
+```
+
+Secondly, we create bootstrap resamples of the training data for model evaluation.
+
+```{r}
+set.seed(123)
+penguin_bs <- bootstraps(penguin_train)
+penguin_bs
+```
+
+For this analysis, we will be comparing 2 different models: *logistic regression* and *random forest*. Let's create the model specifications.
+
+```{r}
+glm_spec <- logistic_reg() %>% 
+  set_engine("glm")
+
+glm_spec
+```
+
+```{r}
+rf_spec <- rand_forest() %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger")
+
+rf_spec
+```
+
+Fourthly, we'll create `workflow()` for our models, which is a helper object to manage modeling pipelines with pieces that fit together like Lego blocks. 
+
+```{r}
+penguin_wf <- workflow() %>% 
+  add_formula(sex ~.)
+penguin_wf
+```
+
+Next, we'll add the models into the `penguin_wf` and then fit to each of the resamples. Let's start with the *logistic regression* model first.
+
+```{r}
+glm_rs <- penguin_wf %>% 
+  add_model(glm_spec) %>% 
+  fit_resamples(
+    resamples = penguin_bs,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+glm_rs
+```
+
+Now, we can fit the *random forest* model.
+```{r}
+rf_rs <- penguin_wf %>% 
+  add_model(rf_spec) %>% 
+  fit_resamples(
+    resamples = penguin_bs,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+rf_rs
+```
+
+We can then proceed to evaluate these 2 models and pick the better one.
+
+## Model Evaluation
+
+For *logistic regression*,
+```{r}
+collect_metrics(glm_rs)
+```
+
+For *random forest*,
+```{r}
+collect_metrics(rf_rs)
+```
+
+As we can observe, both models work pretty good with high **accuracy** and **roc_auc**. To proceed, we can apply as a general rule of thumb: if a more complex model performs similary to a simpler model, pick the simpler model. Thus, we will choose *logistic regression*. Let's plot an ROC curve.
+
+```{r}
+glm_rs %>% 
+  collect_predictions() %>% 
+  group_by(id) %>% 
+  roc_curve(sex, .pred_female) %>% 
+  ggplot(aes(1 - specificity, sensitivity, color = id)) +
+  geom_abline(lty = 2, color = 'gray80', size = 1.5) +
+  geom_path(show.legend = FALSE, alpha = 0.6, size = 1.2) + 
+  coord_equal() +
+  theme_bw()
+```
+
+Notive that this ROC curve is more jagged than common ones because the small size of our dataset.
+
+Let's now evaluate using our testing set with fitting one last time the model to the training data using the function `last_fit()`.
+
+```{r}
+penguin_final <- penguin_wf %>% 
+  add_model(glm_spec) %>% 
+  last_fit(penguin_split)
+penguin_final
+```
+
+Let's look at the results
+```{r}
+collect_metrics(penguin_final)
+```
+
+```{r}
+collect_predictions(penguin_final) %>% 
+  conf_mat(sex, .pred_class)
+```
+
+We can also look at the coefficients using `tidy()`.
+
+
