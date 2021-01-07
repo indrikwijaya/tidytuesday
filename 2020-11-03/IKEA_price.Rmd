@@ -1,0 +1,94 @@
+---
+title: "Predicting the Price of IKEA Furniture"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dpi = 180)
+library(tidyverse)
+```
+
+For this [TidyTuesday](https://github.com/rfordatascience/tidytuesday) dataset, we will be looking at IKEA furniture prices. We thus aim to predic the price of IKEA furniture from other furniture features such as category and size. This analysis is motivated by [Julia Silge's screencast](https://juliasilge.com/blog/ikea-prices/).
+
+```{r, echo = FALSE}
+ikea <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-11-03/ikea.csv")
+```
+
+## Exploratory Data Analysis
+It is common to look at log values of the a parameter whose magnitude is in thousands such as price
+```{r, echo = FALSE}
+ikea %>% 
+  select(X1, price, depth:width) %>% 
+  pivot_longer(depth:width, names_to = "dim") %>% 
+  ggplot(aes(value, price, color = dim)) + 
+  geom_point(alpha = 0.4, show.legend = FALSE) +
+  scale_y_log10() +
+  facet_wrap(~ dim, scales = "free_x") +
+  labs(x = NULL)
+```
+- it seems width has the strongest relationship with price
+
+- reasonable observation includes bigger objects have higher price
+
+```{r}
+ikea_df <- ikea %>% 
+  select(price, name, category, depth, height, width) %>% 
+  mutate(price = log10(price)) %>% 
+  mutate_if(is.character, factor)
+```
+
+## Build a predictive model
+
+```{r}
+library(tidymodels)
+
+set.seed(123)
+ikea_split <- initial_split(ikea_df, strata = price)
+ikea_train <- training(ikea_split)
+ikea_test <- testing(ikea_split)
+
+# set resamples for tuning of our model
+set.seed(234)
+ikea_folds <- bootstraps(ikea_train, strata = price)
+ikea_folds
+```
+
+`usemodels` package can be very helpful here because it provides scaffolding for getting started with tidymodels tuning. It will yield a good standard default workflow. It requires two inputs:
+- a formula to describe our model, just like `lm`, `price ~.`
+
+- our training data
+
+```{r}
+library(usemodels)
+library(textrecipes)
+use_ranger(price ~ ., data = ikea_train)
+
+ranger_recipe <- 
+  recipe(formula = price ~ ., data = ikea_train) %>% 
+  # name's levels are too many
+  step_other(name, category, threshold = 0.01) %>% 
+  # some names have punctuations, different cases
+  step_clean_levels(name, category) %>% 
+  # there are too many NA's --> instead of removing these data, we impute
+  step_knnimpute(depth, height, width)
+
+ranger_spec <- 
+  rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
+  set_mode("regression") %>% 
+  set_engine("ranger") 
+
+ranger_workflow <- 
+  workflow() %>% 
+  add_recipe(ranger_recipe) %>% 
+  add_model(ranger_spec) 
+
+set.seed(91010)
+doParallel::registerDoParallel()
+ranger_tune <-
+  tune_grid(ranger_workflow, 
+            resamples = ikea_folds,
+            grid = 11)
+```
+The `usemodels` required us to input manually the `resamples` and `grid` parameters.
