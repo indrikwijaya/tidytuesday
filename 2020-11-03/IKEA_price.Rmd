@@ -159,6 +159,8 @@ workflow() %>%
 
 - `name` is the least important which is probably because we don't have enough data.
 
+- `category` surprisingly has low importance. It is usually easy to roughly guess the price of an item based on its category.
+
 Let's try running different algorithm such as xgboost
 
 ```{r}
@@ -170,10 +172,10 @@ xgboost_recipe <-
   # some names have punctuations, different cases
   step_clean_levels(name, category) %>% 
   # there are too many NA's --> instead of removing these data, we impute
-  step_knnimpute(depth, height, width) %>% 
-  step_novel(all_nominal(), -all_outcomes()) %>% 
-  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>% 
-  step_zv(all_predictors()) 
+  step_knnimpute(depth, height, width) %>%
+  step_novel(all_nominal(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>%
+  step_zv(all_predictors())
 
 xgboost_spec <- 
   boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(), 
@@ -186,10 +188,15 @@ xgboost_workflow <-
   add_recipe(xgboost_recipe) %>% 
   add_model(xgboost_spec) 
 
+doParallel::registerDoParallel()
 set.seed(41860)
 xgboost_tune <-
   tune_grid(xgboost_workflow, 
             resamples = ikea_folds, 
-            grid = 7)
+            grid = 4)
 ```
 
+```{r}
+autoplot(xgboost_tune)
+```
+Since the autoplot suggest that there's no best-performing model from xgboost, we may want to fine tune the parameters to ensure our model runs properly.
