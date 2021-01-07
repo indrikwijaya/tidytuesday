@@ -92,3 +92,104 @@ ranger_tune <-
             grid = 11)
 ```
 The `usemodels` required us to input manually the `resamples` and `grid` parameters.
+
+## Explore Results
+Let's check the best-performing models in the tuning results
+
+```{r}
+show_best(ranger_tune, metric = 'rmse')
+
+show_best(ranger_tune, metric = 'rsq')
+```
+
+Let's now see on the performance of all the possible paramater combinations
+```{r}
+autoplot(ranger_tune)
+```
+
+* regular autoplot will usually show curvey trends, instead of sparse grid like what we have here.
+
+With the best-performing parameters, let's update our random forest workflow
+```{r}
+final_rf <- ranger_workflow %>% 
+  finalize_workflow(select_best(ranger_tune))
+
+final_rf
+```
+
+```{r}
+ikea_fit <- last_fit(final_rf, ikea_split)
+ikea_fit
+```
+
+```{r}
+collect_metrics(ikea_fit)
+```
+
+```{r}
+collect_predictions(ikea_fit) %>% 
+  ggplot(aes(price, .pred)) +
+  geom_abline(lty = 2, color = "gray50") + 
+  geom_point(alpha = 0.5, color = "midnightblue")
+```
+
+- we do better on cheaper things
+
+We can use this model to predict other data e.g.
+```{r}
+predict(ikea_fit$.workflow[[1]], ikea_test[15,])
+```
+
+```{r}
+library(vip)
+
+imp_spec <- ranger_spec %>% 
+  finalize_model(select_best(ranger_tune)) %>% 
+  set_engine("ranger", importance = "permutation")
+
+workflow() %>% 
+  add_recipe(ranger_recipe) %>% 
+  add_model(imp_spec) %>% 
+  fit(ikea_train) %>% 
+  pull_workflow_fit() %>% 
+  vip(aesthetics = list(alpha = 0.8, fill = 'midnightblue'))
+```
+
+- `width` is the most important feature which is what we observed earlier during exploratory data analysis
+
+- `name` is the least important which is probably because we don't have enough data.
+
+Let's try running different algorithm such as xgboost
+
+```{r}
+use_xgboost(price ~., data = ikea_train)
+xgboost_recipe <- 
+  recipe(formula = price ~ ., data = ikea_train) %>% 
+  # name's levels are too many
+  step_other(name, category, threshold = 0.01) %>% 
+  # some names have punctuations, different cases
+  step_clean_levels(name, category) %>% 
+  # there are too many NA's --> instead of removing these data, we impute
+  step_knnimpute(depth, height, width) %>% 
+  step_novel(all_nominal(), -all_outcomes()) %>% 
+  step_dummy(all_nominal(), -all_outcomes(), one_hot = TRUE) %>% 
+  step_zv(all_predictors()) 
+
+xgboost_spec <- 
+  boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune(), 
+    loss_reduction = tune(), sample_size = tune()) %>% 
+  set_mode("regression") %>% 
+  set_engine("xgboost") 
+
+xgboost_workflow <- 
+  workflow() %>% 
+  add_recipe(xgboost_recipe) %>% 
+  add_model(xgboost_spec) 
+
+set.seed(41860)
+xgboost_tune <-
+  tune_grid(xgboost_workflow, 
+            resamples = ikea_folds, 
+            grid = 7)
+```
+
